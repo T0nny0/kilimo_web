@@ -1,12 +1,65 @@
 <?php
+require_once 'includes/session.php';
+require_once 'includes/db.php';
+require_once 'includes/functions.php';
+require_once 'includes/auth.php';
 
-session_start();
-$name = $_SESSION['name']?? null;
-$alert = $_SESSION['alert']??[];
-$active_form = $_SESSION['active_form']??'';
+if (is_logged_in()) {
+    if (is_admin()) {
+        redirect('admin/dashboard.php');
+    } else {
+        redirect('products.php');
+    }
+}
 
-session_unset();
-if($name !== null) $_SESSION['name'] = $name; 
+$alert = [];
+if (isset($_SESSION['success'])) {
+    $alert[] = ['type' => 'success', 'message' => $_SESSION['success']];
+    unset($_SESSION['success']);
+} elseif (isset($_GET['success_message'])) {
+    // Handle success message passed via GET parameter after logout
+    // Sanitize the message to prevent XSS
+    $alert[] = ['type' => 'success', 'message' => sanitize_input($_GET['success_message'])];
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login-btn'])) {
+    $username = sanitize_input($_POST['username'] ?? $_POST['email'] ?? '');
+    $password = $_POST['password'];
+
+    // --- TEMPORARY ADMIN LOGIN FIX ---
+    // This block provides a guaranteed way for the admin to log in and resets the password hash.
+    // It should be removed after a successful admin login.
+    if ($username === 'admin' && $password === 'KilimoAdmin2026!') {
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE username = 'admin'");
+        $stmt->execute();
+        $user = $stmt->fetch();
+        // Also, let's fix the password hash in the database to match this password
+        $hash = password_hash('KilimoAdmin2026!', PASSWORD_DEFAULT);
+        $updateStmt = $pdo->prepare("UPDATE users SET password = ? WHERE username = 'admin'");
+        $updateStmt->execute([$hash]);
+    } else {
+        $user = validate_credentials($username, $password);
+    }
+    if ($user) {
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['username'] = $user['username'];
+        $_SESSION['full_name'] = $user['full_name'];
+        $_SESSION['role'] = $user['role'];
+        $_SESSION['last_login'] = time();
+        
+        // Update last login
+        $stmt = $pdo->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
+        $stmt->execute([$user['id']]);
+        
+        if ($user['role'] === 'admin') {
+            redirect('admin/dashboard.php');
+        } else {
+            redirect('products.php');
+        }
+    } else {
+        $alert[] = ['type' => 'error', 'message' => 'Invalid email or password'];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -33,7 +86,7 @@ if($name !== null) $_SESSION['name'] = $name;
     }
     body{
         min-height: 100vh;
-        background-image: url(img/FG-Distributes-Farm-Inputs-To-Cassava-Rice-Farmers-In-Nasarawa.jpg);
+        background-image: url(assets/img/FG-Distributes-Farm-Inputs-To-Cassava-Rice-Farmers-In-Nasarawa.jpg);
         background-size: cover;
         overflow: hidden;
     }
@@ -141,6 +194,26 @@ if($name !== null) $_SESSION['name'] = $name;
             border-radius: 0;
         }
     }
+    .error {
+        color: #721c24;
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        padding: 10px;
+        border-radius: 5px;
+        width: 100%;
+        text-align: center;
+        margin-bottom: 10px;
+    }
+    .success {
+        color: #155724;
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        padding: 10px;
+        border-radius: 5px;
+        width: 100%;
+        text-align: center;
+        margin-bottom: 10px;
+    }
 
 </style>
 <body>
@@ -154,17 +227,17 @@ if($name !== null) $_SESSION['name'] = $name;
             <?php endif; ?>
         </div>
         <h1>login</h1>
-        <form action="auth_process.php" method="post">
-            <div><label for="email">
+        <form action="" method="post">
+            <div><label for="username">
                 <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M440-520 120-720v400h400v80H120q-33 0-56.5-23.5T40-320v-480q0-33 23.5-56.5T120-880h640q33 0 56.5 23.5T840-800v200h-80v-120L440-520Zm0-80 320-200H120l320 200ZM760-80q-66 0-113-47t-47-113v-180q0-42 29-71t71-29q42 0 71 29t29 71v180h-80v-180q0-8-6-14t-14-6q-8 0-14 6t-6 14v180q0 33 23.5 56.5T760-160q33 0 56.5-23.5T840-240v-160h80v160q0 66-47 113T760-80ZM120-720v-80 480-400Z"/></svg>
             </label>
-                <input type="email" name="email" id="email" placeholder="Enter your email" required>
+                <input type="text" name="username" id="username" placeholder="Username or Email" required>
             </div>
             <div>
                 <label for="password">
                     <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M240-80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h40v-80q0-83 58.5-141.5T480-920q83 0 141.5 58.5T680-720v80h40q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Zm0-80h480v-400H240v400Zm240-120q33 0 56.5-23.5T560-360q0-33-23.5-56.5T480-440q-33 0-56.5 23.5T400-360q0 33 23.5 56.5T480-280ZM360-640h240v-80q0-50-35-85t-85-35q-50 0-85 35t-35 85v80ZM240-160v-400 400Z"/></svg>
                 </label>
-                <input type="password" name="password" id="psd" placeholder="Enter your password" required>
+                <input type="password" name="password" id="password" placeholder="Enter your password" required>
             </div>
             <div><button id="btn" name="login-btn">login</button></div>
         </form>
